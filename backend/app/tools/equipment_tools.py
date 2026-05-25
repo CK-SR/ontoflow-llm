@@ -8,6 +8,8 @@ def analyze_equipment_risk(equipment_id: int) -> dict:
         if not eq:
             raise ValueError("设备不存在")
         supplier = conn.execute("SELECT * FROM supplier WHERE id=?", (eq['supplier_id'],)).fetchone()
+        manufacturer = conn.execute("SELECT * FROM manufacturer WHERE id=?", (eq['manufacturer_id'],)).fetchone()
+        location = conn.execute("SELECT * FROM location WHERE id=?", (eq['location_id'],)).fetchone()
         ms = conn.execute("SELECT * FROM maintenance_record WHERE equipment_id=?", (equipment_id,)).fetchall()
     score, reasons = 0, []
     if eq['status'] == '异常': score += 30; reasons.append('status=异常 +30')
@@ -19,4 +21,7 @@ def analyze_equipment_risk(equipment_id: int) -> dict:
     elif supplier and supplier['risk_level'] == '中': score += 10; reasons.append('供应商风险中 +10')
     level = '高' if score >= 70 else ('中' if score >= 40 else '低')
     return {"equipment_id": eq['id'], "equipment_name": eq['name'], "risk_score": min(score,100), "risk_level": level,
-            "reasons": reasons, "related_supplier": supplier['name'] if supplier else None, "maintenance_count": len(ms)}
+            "reasons": reasons, "related_supplier": supplier['name'] if supplier else None,
+            "related_manufacturer": manufacturer['name'] if manufacturer else None,
+            "related_location": location['name'] if location else None,
+            "maintenance_count": len(ms)}

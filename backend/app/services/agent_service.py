@@ -5,6 +5,108 @@ from app.schemas.chat import ChatResponse, ToolCallTrace
 from app.services.llm_client import LLMClient
 from app.tools.equipment_tools import analyze_equipment_risk
 
+SYSTEM_PROMPT = """你是一个工业设备知识图谱问答助手，通过调用工具查询数据并用中文回答用户问题。
+
+## 数据库结构
+业务库包含以下表：
+- equipment(id, name, model, category, manufacturer_id, status, location_id, supplier_id, importance_level) — 设备信息，共6台(id 1-6)
+- manufacturer(id, name, qualification_level, contact) — 生产厂家
+- location(id, name, type, parent_id) — 部署位置
+- maintenance_record(id, equipment_id, fault_desc, repair_action, repair_time, operator, severity) — 维修记录
+- supplier(id, name, credit_level, risk_level) — 供应商
+- purchase_contract(id, equipment_id, supplier_id, contract_no, amount, purchase_date) — 采购合同
+
+## 工具使用指南
+- 查设备风险/异常 → **优先用 analyze_equipment_risk**，逐个或批量调用(id 1-6)
+- 查设备列表/状态 → 用 query_sql，如 SELECT * FROM equipment
+- 查表结构/元数据 → 用 list_tables + describe_table
+- 查知识图谱关联 → 用 search_graph(输入实体名称如"空压机") 或 get_entity_neighbors
+- 图谱节点标签是具体名称(如"空压机A"、"华北智造")，不要用"风险"等抽象词搜索图谱
+
+## 重要规则
+1. 已知数据库只有6台设备(id 1-6)，需要分析所有设备时请批量调用 analyze_equipment_risk
+2. 不要重复调用已获取过结果的工具
+3. 收集到足够数据后立即给出最终回答，不要继续探索"""
+
+TOOL_DEFINITIONS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_data_sources",
+            "description": "列出所有可用的数据源",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_tables",
+            "description": "列出当前数据源中的所有表名",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "describe_table",
+            "description": "获取指定表的列信息",
+            "parameters": {
+                "type": "object",
+                "properties": {"table_name": {"type": "string", "description": "表名"}},
+                "required": ["table_name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "query_sql",
+            "description": "执行只读SQL查询（仅允许SELECT），最多返回50行",
+            "parameters": {
+                "type": "object",
+                "properties": {"sql": {"type": "string", "description": "SQL查询语句"}},
+                "required": ["sql"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_graph",
+            "description": "在知识图谱中搜索包含关键词的实体节点",
+            "parameters": {
+                "type": "object",
+                "properties": {"keyword": {"type": "string", "description": "搜索关键词"}},
+                "required": ["keyword"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_entity_neighbors",
+            "description": "获取知识图谱中某实体的所有相邻节点及关系",
+            "parameters": {
+                "type": "object",
+                "properties": {"node_id": {"type": "integer", "description": "实体节点ID"}},
+                "required": ["node_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "analyze_equipment_risk",
+            "description": "分析指定设备的风险等级和风险原因",
+            "parameters": {
+                "type": "object",
+                "properties": {"equipment_id": {"type": "integer", "description": "设备ID"}},
+                "required": ["equipment_id"],
+            },
+        },
+    },
+]
+
 
 class AgentService:
     def __init__(self) -> None:
@@ -26,7 +128,63 @@ class AgentService:
             text = "数据来源: LLM(MOCK)。请询问数据源、表、异常设备或风险。"
         return ChatResponse(answer=text, tool_calls=traces, data_source="TOOL")
 
+    def _call_tool(self, name: str, arguments: dict) -> str:
+        func = TOOLS.get(name)
+        if not func:
+            return f"未知工具: {name}"
+        try:
+            result = func(**arguments)
+            return json.dumps(result, ensure_ascii=False) if not isinstance(result, str) else result
+        except Exception as e:
+            return f"工具调用出错: {e}"
+
+    MAX_ITERATIONS = 10
+
+    def _real(self, message: str) -> ChatResponse:
+        messages = [
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": message},
+        ]
+        traces: list[ToolCallTrace] = []
+
+        for _ in range(self.MAX_ITERATIONS):
+            resp = self.llm.chat_with_tools(messages, TOOL_DEFINITIONS)
+            tool_calls = resp.get("tool_calls")
+
+            if not tool_calls:
+                answer = resp.get("content") or ""
+                return ChatResponse(
+                    answer=answer,
+                    tool_calls=traces,
+                    data_source="LLM+TOOL" if traces else "LLM",
+                )
+
+            messages.append(resp)
+
+            for tc in tool_calls:
+                fn = tc["function"]
+                name = fn["name"]
+                try:
+                    arguments = json.loads(fn["arguments"])
+                except json.JSONDecodeError:
+                    arguments = {}
+                result_str = self._call_tool(name, arguments)
+                traces.append(ToolCallTrace(
+                    tool_name=name,
+                    arguments=arguments,
+                    result_preview=result_str[:500],
+                ))
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result_str,
+                })
+
+        return ChatResponse(answer="工具调用轮次已达上限，请简化问题。", tool_calls=traces, data_source="LLM+TOOL")
+
     def chat(self, message: str) -> ChatResponse:
         if settings.mock_llm:
             return self._mock(message)
-        return self._mock(message)
+        if not self.llm.enabled:
+            return self._mock(message)
+        return self._real(message)

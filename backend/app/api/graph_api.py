@@ -23,7 +23,18 @@ def search(keyword:str): return g.search(keyword)
 @router.get('/equipment')
 def equipment():
     with connect(settings.equipment_db) as conn:
-        return rows_to_dict(conn.execute('SELECT * FROM equipment ORDER BY id').fetchall())
+        rows = conn.execute(
+            'SELECT e.*, '
+            'm.name AS manufacturer_name, '
+            'l.name AS location_name, '
+            's.name AS supplier_name '
+            'FROM equipment e '
+            'LEFT JOIN manufacturer m ON e.manufacturer_id = m.id '
+            'LEFT JOIN location l ON e.location_id = l.id '
+            'LEFT JOIN supplier s ON e.supplier_id = s.id '
+            'ORDER BY e.id'
+        ).fetchall()
+        return rows_to_dict(rows)
 
 @router.get('/equipment/risks')
 def risks(): return [analyze_equipment_risk(i) for i in range(1,7)]

@@ -1,4 +1,6 @@
+import os
 from pathlib import Path
+
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
@@ -19,6 +21,9 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         populate_by_name = True
+
+    def get_api_key(self) -> str:
+        return self.openai_api_key or os.getenv("DASHSCOPE_API_KEY", "")
 
 
 settings = Settings()
