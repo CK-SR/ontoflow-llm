@@ -1,6 +1,8 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.bootstrap import ensure_runtime_ready
+from app.logging_config import setup_logging
 from app.api.datasource_api import router as datasource_router
 from app.api.metadata_api import router as metadata_router
 from app.api.ontology_api import router as ontology_router
@@ -8,6 +10,9 @@ from app.api.graph_api import router as graph_router
 from app.api.chat_api import router as chat_router
 
 app = FastAPI(title="Mini OntoFlow")
+logger = logging.getLogger(__name__)
+
+setup_logging()
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,4 +34,6 @@ app.include_router(chat_router)
 
 @app.on_event("startup")
 def startup_init() -> None:
+    logger.info("Starting backend service...")
     ensure_runtime_ready()
+    logger.info("Runtime bootstrap completed.")
