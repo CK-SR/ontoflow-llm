@@ -1,0 +1,19 @@
+{
+  "name": "equipment_ontology_v1",
+  "entities": [
+    {"type": "Equipment", "label": "设备", "properties": ["id", "name", "model", "category", "status", "importance_level"]},
+    {"type": "Manufacturer", "label": "生产厂家", "properties": ["id", "name", "qualification_level", "contact"]},
+    {"type": "Location", "label": "部署位置", "properties": ["id", "name", "type", "parent_id"]},
+    {"type": "MaintenanceRecord", "label": "维修记录", "properties": ["id", "equipment_id", "fault_desc", "repair_action", "repair_time", "operator", "severity"]},
+    {"type": "Supplier", "label": "供应商", "properties": ["id", "name", "credit_level", "risk_level"]},
+    {"type": "PurchaseContract", "label": "采购合同", "properties": ["id", "equipment_id", "supplier_id", "contract_no", "amount", "purchase_date"]}
+  ],
+  "relations": [
+    {"source": "Equipment", "target": "Manufacturer", "label": "PRODUCED_BY"},
+    {"source": "Equipment", "target": "Location", "label": "LOCATED_IN"},
+    {"source": "Equipment", "target": "MaintenanceRecord", "label": "HAS_MAINTENANCE"},
+    {"source": "Equipment", "target": "Supplier", "label": "SUPPLIED_BY"},
+    {"source": "Equipment", "target": "PurchaseContract", "label": "HAS_CONTRACT"},
+    {"source": "Supplier", "target": "PurchaseContract", "label": "SIGNED_CONTRACT"}
+  ]
+}
